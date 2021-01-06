@@ -10,6 +10,8 @@ Cargo.lock
 **/*.rs.bk
 
 # some local files being used
+**/images/**
 gcp-creds.json
 rusty-tags.vi
 setup.sh
+.DS_Store
