@@ -1,7 +1,6 @@
 use base64::encode;
 use futures::executor::block_on;
 use magick_rust::{magick_wand_genesis, MagickWand};
-use reqwest;
 use serde_json::Value;
 use std::env;
 use std::error::Error;
@@ -59,7 +58,7 @@ fn image_payload(encoded_image: &str) -> String {
 // image over the wire.
 fn encode_image(image_path: &str) -> Result<String, Box<dyn Error>> {
     print!("Processing image at {} -> ", image_path);
-    io::stdout().flush().ok().expect("Could not flush stdout");
+    io::stdout().flush()?;
     START.call_once(|| {
         magick_wand_genesis();
     });
@@ -72,9 +71,11 @@ fn encode_image(image_path: &str) -> Result<String, Box<dyn Error>> {
 
 // Hit the Google vision API to query for the Base64 encoded image and return the
 // best guess label.
-async fn google_image(encoded_image: &str) -> Result<String, Box<dyn Error>> {
+async fn google_image(
+    client: &reqwest::Client,
+    encoded_image: &str,
+) -> Result<String, Box<dyn Error>> {
     let payload = image_payload(encoded_image);
-    let client = reqwest::Client::new();
     let resp = client
         .post("https://vision.googleapis.com/v1/images:annotate")
         .body(payload)
@@ -92,12 +93,14 @@ async fn google_image(encoded_image: &str) -> Result<String, Box<dyn Error>> {
 }
 
 // Hit Discog API with to search for an album ID to be added to user collection
-async fn discog_query(album_query: &str) -> Result<String, Box<dyn Error>> {
+async fn discog_query(
+    client: &reqwest::Client,
+    album_query: &str,
+) -> Result<String, Box<dyn Error>> {
     print!("{} -> ", album_query);
-    io::stdout().flush().ok().expect("Could not flush stdout");
+    io::stdout().flush()?;
     let user_name = env::var("AT_DISCOGS_USER")?;
     let token = env::var("AT_DISCOGS_TOKEN")?;
-    let client = reqwest::Client::new();
     let resp = client
         .get(&format!(
             "https://api.discogs.com/database/search?q={}&token={}",
@@ -112,10 +115,12 @@ async fn discog_query(album_query: &str) -> Result<String, Box<dyn Error>> {
     Ok(serde_json::from_str::<Value>(&resp)?["results"][1]["id"].to_string())
 }
 
-async fn discog_update(discog_album_id: &str) -> Result<(), Box<dyn Error>> {
+async fn discog_update(
+    client: &reqwest::Client,
+    discog_album_id: &str,
+) -> Result<(), Box<dyn Error>> {
     let user_name = env::var("AT_DISCOGS_USER")?;
     let token = env::var("AT_DISCOGS_TOKEN")?;
-    let client = reqwest::Client::new();
     let resp = client
         .post(&format!(
             "https://api.discogs.com/users/{}/collection/folders/1/releases/{}?token={}",
@@ -132,7 +137,7 @@ async fn discog_update(discog_album_id: &str) -> Result<(), Box<dyn Error>> {
         "created {} {} ({})",
         resp["artists"][0]["name"], resp["title"], resp["formats"][0]["name"]
     );
-    io::stdout().flush().ok().expect("Could not flush stdout");
+    io::stdout().flush()?;
     Ok(())
 }
 
@@ -143,13 +148,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let image_files: Vec<std::path::PathBuf> = fs::read_dir(&args[1])?
         .map(|res| res.unwrap().path())
         .collect();
+    let client = reqwest::Client::new();
     for image_path in image_files {
         print!(">>");
-        io::stdout().flush().ok().expect("Could not flush stdout");
+        io::stdout().flush()?;
         let encoded_image = encode_image(image_path.to_str().unwrap())?;
-        let album_info = block_on(google_image(&encoded_image))?;
-        let discog_id = block_on(discog_query(&album_info))?;
-        block_on(discog_update(&discog_id))?;
+        let album_info = block_on(google_image(&client, &encoded_image))?;
+        let discog_id = block_on(discog_query(&client, &album_info))?;
+        block_on(discog_update(&client, &discog_id))?;
         println!("<<:");
     }
     Ok(())
