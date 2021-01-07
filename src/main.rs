@@ -15,11 +15,10 @@ use std::sync::Once;
 static START: Once = Once::new();
 
 // Use the GCP SDK to get a token
-const GCP_SDK: &'static str = "/Applications/google-cloud-sdk/bin/gcloud";
 fn gcp_auth_token() -> String {
     assert!(env::var("GOOGLE_APPLICATION_CREDENTIALS").is_ok());
     String::from_utf8_lossy(
-        &Command::new(GCP_SDK)
+        &Command::new(env::var("AT_GCP_SDK").unwrap())
             .arg("auth")
             .arg("application-default")
             .arg("print-access-token")
@@ -57,6 +56,7 @@ fn image_payload(encoded_image: &str) -> String {
 // Read in and resize the image to shrink the size since our query takes the Base64 encoding of the
 // image over the wire.
 fn encode_image(image_path: &str) -> Result<String, Box<dyn Error>> {
+    print!("Processing image at {} -> ", image_path);
     START.call_once(|| {
         magick_wand_genesis();
     });
@@ -88,6 +88,49 @@ async fn google_image(encoded_image: &str) -> Result<String, Box<dyn Error>> {
     )
 }
 
+// Hit Discog API with to search for an album ID to be added to user collection
+async fn discog_query(album_query: &str) -> Result<String, Box<dyn Error>> {
+    print!("{} -> ", album_query);
+    let user_name = env::var("AT_DISCOGS_USER")?;
+    let token = env::var("AT_DISCOGS_TOKEN")?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&format!(
+            "https://api.discogs.com/database/search?q={}&token={}",
+            album_query, token
+        ))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .header("User-Agent", format!("AlbumTracker/{}", user_name))
+        .send()
+        .await?
+        .text()
+        .await?;
+    Ok(serde_json::from_str::<Value>(&resp)?["results"][1]["id"].to_string())
+}
+
+async fn discog_update(discog_album_id: &str) -> Result<(), Box<dyn Error>> {
+    let user_name = env::var("AT_DISCOGS_USER")?;
+    let token = env::var("AT_DISCOGS_TOKEN")?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&format!(
+            "https://api.discogs.com/users/{}/collection/folders/1/releases/{}?token={}",
+            user_name, discog_album_id, token
+        ))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .header("User-Agent", format!("AlbumTracker/{}", user_name))
+        .send()
+        .await?
+        .text()
+        .await?;
+    let resp = &serde_json::from_str::<Value>(&resp)?["basic_information"];
+    println!(
+        "created {} {} ({})",
+        resp["artists"][0]["name"], resp["title"], resp["formats"][0]["name"]
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
@@ -95,7 +138,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let image_files: Vec<std::path::PathBuf> = fs::read_dir(&args[1])?
         .map(|res| res.unwrap().path())
         .collect();
-    println!("Processing {:?}", image_files);
     let image_files: Vec<String> = image_files
         .iter()
         .map(|path| encode_image(path.to_str().unwrap()).unwrap())
@@ -104,6 +146,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|image| block_on(google_image(image)).unwrap())
         .collect();
-    println!("{:?}", album_queries);
+    let discog_album_ids: Vec<String> = album_queries
+        .iter()
+        .map(|album_name| block_on(discog_query(album_name)).unwrap())
+        .collect();
+    for discog_album_id in discog_album_ids {
+        block_on(discog_update(&discog_album_id))?;
+    }
     Ok(())
 }
