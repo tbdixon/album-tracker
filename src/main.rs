@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::io;
+use std::io::prelude::*;
 use std::process::Command;
 use std::result::Result;
 use std::sync::Once;
@@ -57,6 +59,7 @@ fn image_payload(encoded_image: &str) -> String {
 // image over the wire.
 fn encode_image(image_path: &str) -> Result<String, Box<dyn Error>> {
     print!("Processing image at {} -> ", image_path);
+    io::stdout().flush().ok().expect("Could not flush stdout");
     START.call_once(|| {
         magick_wand_genesis();
     });
@@ -91,6 +94,7 @@ async fn google_image(encoded_image: &str) -> Result<String, Box<dyn Error>> {
 // Hit Discog API with to search for an album ID to be added to user collection
 async fn discog_query(album_query: &str) -> Result<String, Box<dyn Error>> {
     print!("{} -> ", album_query);
+    io::stdout().flush().ok().expect("Could not flush stdout");
     let user_name = env::var("AT_DISCOGS_USER")?;
     let token = env::var("AT_DISCOGS_TOKEN")?;
     let client = reqwest::Client::new();
@@ -124,10 +128,11 @@ async fn discog_update(discog_album_id: &str) -> Result<(), Box<dyn Error>> {
         .text()
         .await?;
     let resp = &serde_json::from_str::<Value>(&resp)?["basic_information"];
-    println!(
+    print!(
         "created {} {} ({})",
         resp["artists"][0]["name"], resp["title"], resp["formats"][0]["name"]
     );
+    io::stdout().flush().ok().expect("Could not flush stdout");
     Ok(())
 }
 
@@ -138,20 +143,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let image_files: Vec<std::path::PathBuf> = fs::read_dir(&args[1])?
         .map(|res| res.unwrap().path())
         .collect();
-    let image_files: Vec<String> = image_files
-        .iter()
-        .map(|path| encode_image(path.to_str().unwrap()).unwrap())
-        .collect();
-    let album_queries: Vec<String> = image_files
-        .iter()
-        .map(|image| block_on(google_image(image)).unwrap())
-        .collect();
-    let discog_album_ids: Vec<String> = album_queries
-        .iter()
-        .map(|album_name| block_on(discog_query(album_name)).unwrap())
-        .collect();
-    for discog_album_id in discog_album_ids {
-        block_on(discog_update(&discog_album_id))?;
+    for image_path in image_files {
+        print!(">>");
+        io::stdout().flush().ok().expect("Could not flush stdout");
+        let encoded_image = encode_image(image_path.to_str().unwrap())?;
+        let album_info = block_on(google_image(&encoded_image))?;
+        let discog_id = block_on(discog_query(&album_info))?;
+        block_on(discog_update(&discog_id))?;
+        println!("<<:");
     }
     Ok(())
 }
