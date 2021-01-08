@@ -111,7 +111,6 @@ async fn discog_query(
         .await?
         .text()
         .await?;
-    // the trait `serde_json::value::Index` is not implemented for `RangeTo<{integer}>`
     let master_id = &serde_json::from_str::<Value>(&resp)?["results"][0]["master_id"];
     let resp = client
         .get(&format!(
@@ -124,6 +123,7 @@ async fn discog_query(
         .await?
         .text()
         .await?;
+    // the trait `serde_json::value::Index` is not implemented for `RangeTo<{integer}>`
     let choice_1 = &serde_json::from_str::<Value>(&resp)?["versions"][0];
     let choice_2 = &serde_json::from_str::<Value>(&resp)?["versions"][1];
     let choice_3 = &serde_json::from_str::<Value>(&resp)?["versions"][2];
