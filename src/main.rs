@@ -15,7 +15,7 @@ use std::sync::Once;
 // do not bother shutting down, we simply exit when we're done.
 static START: Once = Once::new();
 
-// Use the GCP SDK to get a token
+// Use the GCP SDK to get a token -- call command line since I cannot find a Rust SDK
 fn gcp_auth_token() -> String {
     assert!(env::var("GOOGLE_APPLICATION_CREDENTIALS").is_ok());
     String::from_utf8_lossy(
@@ -123,30 +123,20 @@ async fn discog_query(
         .await?
         .text()
         .await?;
-    // the trait `serde_json::value::Index` is not implemented for `RangeTo<{integer}>`
-    let choice_1 = &serde_json::from_str::<Value>(&resp)?["versions"][0];
-    let choice_2 = &serde_json::from_str::<Value>(&resp)?["versions"][1];
-    let choice_3 = &serde_json::from_str::<Value>(&resp)?["versions"][2];
-    let choice_4 = &serde_json::from_str::<Value>(&resp)?["versions"][3];
-    let choice_5 = &serde_json::from_str::<Value>(&resp)?["versions"][4];
-    let choice_6 = &serde_json::from_str::<Value>(&resp)?["versions"][5];
-    let choice_7 = &serde_json::from_str::<Value>(&resp)?["versions"][6];
-    let choice_8 = &serde_json::from_str::<Value>(&resp)?["versions"][7];
-    let choice_9 = &serde_json::from_str::<Value>(&resp)?["versions"][8];
-    let choice_10 = &serde_json::from_str::<Value>(&resp)?["versions"][9];
-    let choices = vec![
-        choice_1, choice_2, choice_3, choice_4, choice_5, choice_6, choice_7, choice_8, choice_9,
-        choice_10,
-    ];
-    for (idx, choice) in choices.iter().enumerate() {
+    for idx in 0..10 {
+        let choice = &serde_json::from_str::<Value>(&resp)?["versions"][idx];
         println!(
             "{}: {} {} {} {}",
             idx, choice["title"], choice["country"], choice["released"], choice["format"]
         );
     }
-    let mut resp = String::new();
-    std::io::stdin().read_line(&mut resp)?;
-    Ok(choices[resp.trim().parse::<usize>().unwrap()]["id"].to_string())
+    let mut choice = String::new();
+    std::io::stdin().read_line(&mut choice)?;
+    Ok(
+        serde_json::from_str::<Value>(&resp)?["versions"][choice.trim().parse::<usize>().unwrap()]
+            ["id"]
+            .to_string(),
+    )
 }
 
 async fn discog_update(
